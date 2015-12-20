@@ -40,7 +40,7 @@ func MakeLayer(numNeurons int, numWeights int) Layer {
 	var neurons []Neuron
 
 	for i := 0; i < numNeurons; i++ {
-		neurons = append(neurons, Neuron{rands(numWeights), 0, []float64{}})
+		neurons = append(neurons, Neuron{rands(numNeurons, numWeights, numWeights), 0, []float64{}})
 	}
 
 	return Layer{neurons}
@@ -68,13 +68,13 @@ func (nn *Network) Train(trainingInputs []float64, trainingOutputs []float64) {
 	// delta_h_3
 
 	for i := L - 2; i >= 0; i-- {
-		deltas[i] = make([]float64, len(layers[i].neurons))
-		for k, n := range layers[i].neurons {
+		deltas[i] = make([]float64, len(layers[i].neurons)) // Deltas for layer i, last hidden layer
+		for k, n := range layers[i].neurons {               // Go through each neuron in last hidden layer
 
-			var deltah float64
+			var deltah float64 // Sum
 
-			for j, _ := range layers[i+1].neurons {
-				deltah += deltas[i+1][j] * layers[i+1].neurons[j].weights[k]
+			for j, _ := range layers[i+1].neurons { // Each of the neurons in the output layer
+				deltah += deltas[i+1][j] /* Output layer deltas */ * layers[i+1].neurons[j].weights[k]
 			}
 
 			deltas[i][k] = deltah * n.output * (1 - n.output)
@@ -96,18 +96,16 @@ func (nn *Network) Train(trainingInputs []float64, trainingOutputs []float64) {
 }
 
 func (nn Network) Inspect() {
-	for i := range nn.layers {
-		layer := nn.layers[i]
-		fmt.Println("===========")
-		fmt.Println(len(layer.neurons))
+	layer := nn.layers[2]
+	fmt.Println("===========")
+	fmt.Println(len(layer.neurons))
 
-		for j := range layer.neurons {
-			neuron := layer.neurons[j]
-			fmt.Println(neuron.weights)
-		}
-
-		fmt.Println("===========")
+	for j := range layer.neurons {
+		neuron := layer.neurons[j]
+		fmt.Println(neuron.weights)
 	}
+
+	fmt.Println("===========")
 }
 
 func (nn Network) Outputs(inputs []float64) []float64 {
@@ -131,7 +129,7 @@ func (n *Neuron) Output(inputs []float64) float64 {
 		output += n.weights[i] * inputs[i]
 	}
 
-	output = sigmoid(output + 1)
+	output = sigmoid(output)
 	n.output = output
 
 	return output
@@ -151,11 +149,12 @@ func sigmoid(input float64) float64 {
 	return float64(1 / (1 + math.Exp(-float64(input))))
 }
 
-func rands(len int) []float64 {
+func rands(lout, lin, len int) []float64 {
 	var outputs []float64
+	epsilon := math.Sqrt(float64(6)) / math.Sqrt(float64(lin+lout))
 
 	for i := 0; i < len; i++ {
-		outputs = append(outputs, rand.Float64()/1000)
+		outputs = append(outputs, rand.Float64()*2*epsilon-epsilon)
 	}
 
 	return outputs
@@ -178,7 +177,7 @@ func label2out(label int) []float64 {
 func main() {
 
 	rand.Seed(time.Now().UTC().UnixNano())
-	network := MakeNetwork(784, 42, 1, 10)
+	network := MakeNetwork(784, 300, 2, 10)
 
 	train, test, err := GoMNIST.Load("GoMNIST/data")
 	if err != nil {
@@ -187,24 +186,27 @@ func main() {
 
 	i := 0
 	sweeper := train.Sweep()
-	for {
-		image, label, present := sweeper.Next()
-		if !present {
-			break
-		}
+	for p := 0; p < 1; p++ {
+		for {
+			image, label, present := sweeper.Next()
+			if !present {
+				break
+			}
 
-		floats := make([]float64, len(image))
-		for i := 0; i < len(image); i++ {
-			floats[i] = float64(image[i]) / 255
-		}
-		network.Train(floats, label2out(int(label)))
-		i++
+			floats := make([]float64, len(image))
+			for i := 0; i < len(image); i++ {
+				floats[i] = float64(image[i]) / 255
+			}
+			network.Train(floats, label2out(int(label)))
+			i++
 
-		if i%10000 == 0 {
-			fmt.Println(i, label, present)
-		}
+			if i%10000 == 0 {
+				fmt.Println(i, label, present)
+			}
 
+		}
 	}
+	sweeper = train.Sweep()
 
 	correct, total := 0, 0
 	sweeper = test.Sweep()
@@ -219,6 +221,7 @@ func main() {
 			floats[i] = float64(image[i]) / 255
 		}
 		outputs := network.Outputs(floats)
+		fmt.Println(outputs)
 		if outputs[int(label)] > 0.5 {
 			correct++
 		}
@@ -226,4 +229,6 @@ func main() {
 
 		fmt.Println(float32(correct) / float32(total))
 	}
+
+	fmt.Println(len(network.layers))
 }
