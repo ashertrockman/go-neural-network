@@ -1,10 +1,16 @@
 package main
 
-import "fmt"
-import "math"
-import rand "math/rand"
-import "time"
-import "github.com/petar/GoMNIST"
+import (
+	"fmt"
+	"github.com/petar/GoMNIST"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"math"
+	rand "math/rand"
+	"os"
+	"time"
+)
 
 type Neuron struct {
 	weights []float64
@@ -40,7 +46,7 @@ func MakeLayer(numNeurons int, numWeights int) Layer {
 	var neurons []Neuron
 
 	for i := 0; i < numNeurons; i++ {
-		neurons = append(neurons, Neuron{rands(numNeurons, numWeights, numWeights), 0, []float64{}})
+		neurons = append(neurons, Neuron{rands(numNeurons, numWeights+1, numWeights+1), 0, []float64{}})
 	}
 
 	return Layer{neurons}
@@ -88,6 +94,7 @@ func (nn *Network) Train(trainingInputs []float64, trainingOutputs []float64) {
 				layer := layers[l]
 				neuron := layer.neurons[j]
 				input := neuron.inputs[k]
+				// Learning rate: 0.5
 				layers[l].neurons[j].weights[k] += -0.5 * delta * input
 			}
 		}
@@ -95,17 +102,36 @@ func (nn *Network) Train(trainingInputs []float64, trainingOutputs []float64) {
 
 }
 
-func (nn Network) Inspect() {
-	layer := nn.layers[2]
-	fmt.Println("===========")
-	fmt.Println(len(layer.neurons))
+func (nn Network) Visualize(filename string) {
+	inputSize := int(math.Sqrt(float64(len(nn.layers[0].neurons)))) * 28
+	img := image.NewRGBA(image.Rect(0, 0, inputSize, inputSize))
 
-	for j := range layer.neurons {
-		neuron := layer.neurons[j]
-		fmt.Println(neuron.weights)
+	x, y, x2, y2 := 0, 0, 0, 0
+	for _, n := range nn.layers[0].neurons {
+		for _, w := range n.weights {
+			w = sigmoid(w)
+			img.Set(x+x2, y+y2, color.RGBA{uint8(w * 255), uint8(w * 255), uint8(w * 255), 255})
+			x++
+
+			if x == 28 {
+				x = 0
+				y++
+			}
+		}
+		x2 += 28
+		if x2 == inputSize {
+			x2 = 0
+			y2 += 28
+		}
+		x, y = 0, 0
 	}
+	file, err := os.Create(filename)
+	if err != nil {
+		fmt.Println("Something happened")
+	}
+	defer file.Close()
 
-	fmt.Println("===========")
+	jpeg.Encode(file, img, &jpeg.Options{80})
 }
 
 func (nn Network) Outputs(inputs []float64) []float64 {
@@ -114,7 +140,8 @@ func (nn Network) Outputs(inputs []float64) []float64 {
 
 	layerOutputs = inputs
 	for i := 0; i < len(nn.layers); i++ {
-		layerOutputs = nn.layers[i].Outputs(layerOutputs)
+
+		layerOutputs = nn.layers[i].Outputs(append(layerOutputs, 1))
 	}
 
 	return layerOutputs
@@ -146,7 +173,7 @@ func (l Layer) Outputs(inputs []float64) []float64 {
 }
 
 func sigmoid(input float64) float64 {
-	return float64(1 / (1 + math.Exp(-float64(input))))
+	return float64(1 / (1 + math.Exp(float64(-input))))
 }
 
 func rands(lout, lin, len int) []float64 {
@@ -154,7 +181,7 @@ func rands(lout, lin, len int) []float64 {
 	epsilon := math.Sqrt(float64(6)) / math.Sqrt(float64(lin+lout))
 
 	for i := 0; i < len; i++ {
-		outputs = append(outputs, rand.Float64()*2*epsilon-epsilon)
+		outputs = append(outputs, (rand.Float64()*2*epsilon - epsilon))
 	}
 
 	return outputs
@@ -178,37 +205,39 @@ func main() {
 
 	rand.Seed(time.Now().UTC().UnixNano())
 	network := MakeNetwork(784, 300, 2, 10)
-
 	train, test, err := GoMNIST.Load("GoMNIST/data")
-	if err != nil {
 
+	if err != nil {
+		fmt.Println("Could not load MNIST data.")
+		os.Exit(1)
 	}
+
+	network.Visualize("visualize.jpg")
 
 	i := 0
+	// Iterate through training set, updating weights for each set of features
 	sweeper := train.Sweep()
-	for p := 0; p < 1; p++ {
-		for {
-			image, label, present := sweeper.Next()
-			if !present {
-				break
-			}
+	for {
+		image2, label, present := sweeper.Next()
+		if !present {
+			break
+		}
 
-			floats := make([]float64, len(image))
-			for i := 0; i < len(image); i++ {
-				floats[i] = float64(image[i]) / 255
-			}
-			network.Train(floats, label2out(int(label)))
-			i++
+		floats := make([]float64, len(image2))
+		for j := 0; j < 784; j++ {
+			floats[j] = float64(image2[j]) / 255
+		}
 
-			if i%10000 == 0 {
-				fmt.Println(i, label, present)
-			}
-
+		network.Train(floats, label2out(int(label)))
+		i++
+		if i%10000 == 0 {
+			fmt.Println(fmt.Sprintf("%d / 60000", i))
+			network.Visualize(fmt.Sprintf("visualize%d.jpg", i))
 		}
 	}
-	sweeper = train.Sweep()
 
 	correct, total := 0, 0
+	// Iterate through test set
 	sweeper = test.Sweep()
 	for {
 		image, label, present := sweeper.Next()
@@ -221,14 +250,12 @@ func main() {
 			floats[i] = float64(image[i]) / 255
 		}
 		outputs := network.Outputs(floats)
-		fmt.Println(outputs)
 		if outputs[int(label)] > 0.5 {
 			correct++
 		}
 		total++
 
+		// Current % correct
 		fmt.Println(float32(correct) / float32(total))
 	}
-
-	fmt.Println(len(network.layers))
 }
